@@ -35,10 +35,11 @@ class PrinterProbe:
             self.gcode.register_command(
                 'DELTA_MANUAL', self.cmd_DELTA_MANUAL,
                 desc=self.cmd_DELTA_MANUAL_help)
-    cmd_PROBE_help = "Probe Z-height at current XY position"
-    def cmd_PROBE(self, params):
+    # Probe the z-height at the current XY location and return the height relative to zero
+    def probe(self):
         homing_state = homing.Homing(self.toolhead)
         pos = self.toolhead.get_position()
+        # Make sure that the probe only goes down the defined max z distance
         pos[2] = max(pos[2] - self.z_distance, 0.)
         try:
             homing_state.homing_move(
@@ -46,6 +47,15 @@ class PrinterProbe:
         except homing.EndstopError as e:
             raise self.gcode.error(str(e))
         self.gcode.reset_last_position()
+        # The z-coordinate should now be `position_endstop` more than the z-height relative to home
+        tool_offset = self.toolhead.get_kinematics().get_steppers("Z")[0].position_endstop
+        return self.toolhead.get_position()[2] - tool_offset
+    cmd_PROBE_help = "Probe Z-height at current XY position"
+    def cmd_PROBE(self, params):
+        probe_height = self.probe()
+        self.gcode.respond_info(
+            "height: %s" % probe_height
+        )
     cmd_QUERY_PROBE_help = "Return the status of the z-probe"
     def cmd_QUERY_PROBE(self, params):
         print_time = self.toolhead.get_last_move_time()
