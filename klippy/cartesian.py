@@ -4,7 +4,7 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import logging
-import stepper, homing
+import stepper, homing, leveling
 
 StepList = (0, 1, 2)
 
@@ -26,6 +26,14 @@ class CartKinematics:
         self.steppers[1].set_max_jerk(max_halt_velocity, max_accel)
         self.steppers[2].set_max_jerk(
             min(max_halt_velocity, self.max_z_velocity), max_accel)
+
+        # Bed Leveling Algorithm
+        blconfig = config.getsection('mesh_leveling')
+        levelingtypes = {'none': leveling.NoLeveling,
+                         'bilinear': leveling.BilinearLeveling,
+                         'high': leveling.HighLeveling}
+        self.leveling = blconfig.getchoice('algorithm', levelingtypes, 'none')(
+            self, printer, self.limits, blconfig)
     def get_steppers(self, flags=""):
         if flags == "Z":
             return [self.steppers[2]]
@@ -107,6 +115,7 @@ class CartKinematics:
         move.limit_speed(
             self.max_z_velocity * z_ratio, self.max_z_accel * z_ratio)
     def move(self, print_time, move):
+
         if self.need_motor_enable:
             self._check_motor_enable(print_time, move)
         for i in StepList:

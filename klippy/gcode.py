@@ -45,7 +45,7 @@ class GCodeParser:
         self.homing_add = [0.0, 0.0, 0.0, 0.0]
         # G-Code state
         self.need_ack = False
-        self.toolhead = self.fan = self.extruder = self.probe = None
+        self.toolhead = self.fan = self.extruder = self.probe = self.leveling = None
         self.heaters = []
         self.speed = 25.0
         self.axis2pos = {'X': 0, 'Y': 1, 'Z': 2, 'E': 3}
@@ -79,6 +79,7 @@ class GCodeParser:
         self.heaters.append(self.printer.objects.get('heater_bed'))
         self.fan = self.printer.objects.get('fan')
         self.probe = self.printer.objects.get('probe')
+        self.leveling = self.toolhead.get_kinematics().leveling
         if self.is_fileinput and self.fd_handle is None:
             self.fd_handle = self.reactor.register_fd(self.fd, self.process_data)
     def reset_last_position(self):
@@ -360,6 +361,7 @@ class GCodeParser:
             delay = self.get_float('P', params, 0.) / 1000.
         self.toolhead.dwell(delay)
     def cmd_G28(self, params):
+        # self.leveling.reset_grid()
         # Move to origin
         axes = []
         for axis in 'XYZ':
@@ -383,39 +385,29 @@ class GCodeParser:
         # This only works if absolute zero Z is the lowest point on the build plate
         # Otherwise, there's a timeout during endstop homing
 
-        # This block will be configurable, but for testing, this is how it is
-        grid_x = 4
-        grid_y = 3
-        min_x = 0
-        max_x = 100
-        min_y = 0
-        max_y = 100
-        pad_x = 5
-        pad_y = 5
-        probe_height = 5
+        # Minimum and maximum POINTS to measure
+        min_x = self.leveling.limits[0][0] + self.leveling.padding[0]
+        max_x = self.leveling.limits[0][1] - self.leveling.padding[0]
+        min_y = self.leveling.limits[1][0] + self.leveling.padding[1]
+        max_y = self.leveling.limits[1][1] - self.leveling.padding[1]
 
-        min_x += pad_x
-        max_x -= pad_x
-        min_y += pad_y
-        max_y -= pad_y
-        int_x = (max_x - min_x) / (grid_x - 1)
-        int_y = (max_y - min_y) / (grid_y - 1)
+        # Intervals between measured points
+        int_x = (max_x - min_x) / (self.leveling.grid_size[0] - 1)
+        int_y = (max_y - min_y) / (self.leveling.grid_size[1] - 1)
 
-        points = [[0. for x in range(grid_x)] for y in range(grid_y)]
-        for y in range(grid_y):
-            for x in range(grid_x):
+        points = [[0. for y in range(self.leveling.grid_size[1])] for x in range(self.leveling.grid_size[0])]
+        for y in range(self.leveling.grid_size[1]):
+            for x in range(self.leveling.grid_size[0]):
                 self.last_position[0] = min_x + int_x * x
                 self.last_position[1] = min_y + int_y * y
-                self.last_position[2] = probe_height
+                self.last_position[2] = self.leveling.probe_height
                 self.toolhead.move(self.last_position, self.speed)
-                points[y][x] = self.probe.probe()
-                self.respond_info(
-                    "height: %s" % points[y][x]
-                )
+                points[x][y] = self.probe.probe()
+
         # Show the user a map of points on their bed
         self.respond_info("\n".join(["".join(["%.2f " % item for item in row])
-            for row in reversed(points)]))
-        # points now holds a map of Z-heights that can be used for bed leveling
+            for row in reversed(zip(*points))]))
+        self.leveling.set_grid(points)
     cmd_M18_aliases = ["M84"]
     def cmd_M18(self, params):
         # Turn off motors

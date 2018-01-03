@@ -195,6 +195,7 @@ class ToolHead:
             'junction_deviation', 0.02, minval=0.)
         self.move_queue = MoveQueue()
         self.commanded_pos = [0., 0., 0., 0.]
+        self.corrected_pos = list(self.commanded_pos)
         # Print time tracking
         self.buffer_time_low = config.getfloat(
             'buffer_time_low', 1.000, above=0.)
@@ -224,7 +225,9 @@ class ToolHead:
                     'delta': delta.DeltaKinematics}
         self.kin = config.getchoice('kinematics', kintypes)(
             self, printer, config)
-    # Print time tracking
+        # if self.kin.leveling:
+        #     self.corrected_pos[2] += self.kin.leveling.height_offset(self.commanded_pos)
+        # Print time tracking
     def update_move_time(self, movetime):
         self.print_time += movetime
         flush_to_time = self.print_time - self.move_flush_time
@@ -312,11 +315,21 @@ class ToolHead:
         return list(self.commanded_pos)
     def set_position(self, newpos):
         self._flush_lookahead()
+        oldpos = list(self.commanded_pos)
         self.commanded_pos[:] = newpos
-        self.kin.set_position(newpos)
-    def move(self, newpos, speed):
+        self.corrected_pos[:] = newpos
+        # if self.kin.leveling and not oldpos[2] == newpos[2]:
+        #     self.corrected_pos[2] += self.kin.leveling.height_offset(newpos)
+        self.kin.set_position(self.corrected_pos)
+    def move(self, newpos, speed, homing_move=False):
         speed = min(speed, self.max_velocity)
-        move = Move(self, self.commanded_pos, newpos, speed)
+        corrected_newpos = list(newpos)
+        if self.kin.leveling and not homing_move:
+            corrected_newpos[2] += self.kin.leveling.height_offset(newpos)
+            move = Move(self, self.corrected_pos, corrected_newpos, speed)
+        else:
+            # move = Move(self, self.corrected_pos, corrected_newpos, speed)
+            move = Move(self, self.commanded_pos, newpos, speed)
         if not move.move_d:
             return
         if move.is_kinematic_move:
@@ -324,6 +337,7 @@ class ToolHead:
         if move.axes_d[3]:
             self.extruder.check_move(move)
         self.commanded_pos[:] = newpos
+        self.corrected_pos[:] = corrected_newpos
         self.move_queue.add_move(move)
         if self.print_time > self.need_check_stall:
             self._check_stall()

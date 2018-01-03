@@ -28,7 +28,7 @@ class Homing:
                 thcoord[i] = coord[i]
         return thcoord
     def retract(self, newpos, speed):
-        self.toolhead.move(self._fill_coord(newpos), speed)
+        self.toolhead.move(self._fill_coord(newpos), speed, True)
     def set_homed_position(self, pos):
         self.toolhead.set_position(self._fill_coord(pos))
     def _get_homing_speed(self, speed, endstops):
@@ -53,7 +53,7 @@ class Homing:
         movepos = self._fill_coord(movepos)
         error = None
         try:
-            self.toolhead.move(movepos, speed)
+            self.toolhead.move(movepos, speed, True)
         except EndstopError as e:
             error = "Error during homing move: %s" % (str(e),)
         # Wait for endstops to trigger
